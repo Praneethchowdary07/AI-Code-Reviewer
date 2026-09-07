@@ -104,3 +104,5 @@ Feel free to fork and improve this project!
 ## 📬 Contact
 
 If you liked this project, feel free to connect with me on LinkedIn!
+
+## Project Setup
