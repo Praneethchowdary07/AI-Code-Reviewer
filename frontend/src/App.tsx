@@ -1,242 +1,242 @@
-import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { useState } from "react";
+import type { FormEvent } from "react";
+import "./App.css";
 
-// ✅ BACKEND URL
-const API = "https://ai-code-reviewer-rbas.onrender.com";
+// Backend URL (FastAPI on Render). Override with VITE_API_URL in Vercel if it changes.
+const API: string =
+  (import.meta as any).env?.VITE_API_URL || "https://ai-code-reviewer-rbas.onrender.com";
+
+type Repo = { name: string; description: string | null; stars: number };
+type Notice = { kind: "ok" | "error"; text: string } | null;
+
+async function post(path: string, body: unknown) {
+  const res = await fetch(`${API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let data: any = {};
+  try {
+    data = await res.json();
+  } catch {
+    /* empty body */
+  }
+  if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+  return data;
+}
+
+const EXAMPLES = [
+  "What does this project do?",
+  "Which tech stack does it use?",
+  "How do I run it locally?",
+];
 
 export default function App() {
+  // auth
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [repo, setRepo] = useState("");
+  const [user, setUser] = useState<string | null>(null);
+  const [authNote, setAuthNote] = useState<Notice>(null);
+
+  // repo + Q&A
+  const [repoUrl, setRepoUrl] = useState("");
+  const [repo, setRepo] = useState<Repo | null>(null);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
-  const [displayText, setDisplayText] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [note, setNote] = useState<Notice>(null);
+  const [busy, setBusy] = useState<"" | "auth" | "analyze" | "ask">("");
 
-  // ✨ Typing effect
-  useEffect(() => {
-    let i = 0;
-    setDisplayText("");
-    if (answer) {
-      const interval = setInterval(() => {
-        setDisplayText(prev => prev + answer.charAt(i));
-        i++;
-        if (i >= answer.length) clearInterval(interval);
-      }, 20);
-      return () => clearInterval(interval);
+  const submitAuth = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!username.trim() || !password) {
+      setAuthNote({ kind: "error", text: "Enter a username and password." });
+      return;
     }
-  }, [answer]);
-
-  // 🔐 SIGNUP
-  const signup = async () => {
+    setBusy("auth");
+    setAuthNote(null);
     try {
-      const res = await fetch(`${API}/signup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password })
-      });
-
-      const data = await res.json();
-      console.log("Signup response:", data);
-
-      if (res.ok) {
-        alert("User created ✅");
+      await post(mode === "login" ? "/login" : "/signup", { username, password });
+      if (mode === "signup") {
+        setAuthNote({ kind: "ok", text: "Account created. You can sign in now." });
+        setMode("login");
       } else {
-        alert(data.detail || "Signup failed ❌");
+        setUser(username.trim());
+        setPassword("");
       }
-    } catch (error) {
-      console.error("Signup error:", error);
-      alert("Server not responding ❌");
+    } catch (err: any) {
+      setAuthNote({ kind: "error", text: friendly(err) });
+    } finally {
+      setBusy("");
     }
   };
 
-  // 🔓 LOGIN
-  const login = async () => {
+  const analyze = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!repoUrl.trim()) return;
+    setBusy("analyze");
+    setNote(null);
+    setAnswer("");
     try {
-      const res = await fetch(`${API}/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password })
-      });
-
-      const data = await res.json();
-      console.log("Login response:", data);
-
-      if (res.ok) {
-        alert("Login success ✅");
-      } else {
-        alert(data.detail || "Login failed ❌");
-      }
-    } catch (error) {
-      console.error("Login error:", error);
-      alert("Server not responding ❌");
+      const data = await post("/analyze", { repo_url: repoUrl.trim() });
+      setRepo({ name: data.name, description: data.description, stars: data.stars });
+    } catch (err: any) {
+      setRepo(null);
+      setNote({ kind: "error", text: friendly(err) });
+    } finally {
+      setBusy("");
     }
   };
 
-  // 📂 ANALYZE
-  const analyze = async () => {
+  const ask = async (q: string) => {
+    if (!q.trim()) return;
+    setQuestion(q);
+    setBusy("ask");
+    setNote(null);
     try {
-      setLoading(true);
-
-      console.log("Sending repo:", repo); // 🔥 DEBUG
-
-      const res = await fetch(`${API}/analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo_url: repo })
-      });
-
-      const data = await res.json();
-      console.log("Analyze response:", data); // 🔥 DEBUG
-
-      if (res.ok) {
-        alert(`✅ ${data.name} ⭐ ${data.stars}\n${data.description}`);
-      } else {
-        alert(data.detail || "Analyze failed ❌");
-      }
-
-      setLoading(false);
-    } catch (error) {
-      console.error("Analyze error:", error);
-      setLoading(false);
-      alert("Server not responding ❌");
-    }
-  };
-
-  // 🤖 ASK
-  const ask = async () => {
-    try {
-      setLoading(true);
-
-      const res = await fetch(`${API}/ask`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q: question })
-      });
-
-      const data = await res.json();
-      console.log("Ask response:", data);
-
-      if (res.ok) {
-        setAnswer(data.answer);
-      } else {
-        alert(data.detail || "Ask failed ❌");
-      }
-
-      setLoading(false);
-    } catch (error) {
-      console.error("Ask error:", error);
-      setLoading(false);
-      alert("Server not responding ❌");
+      const data = await post("/ask", { q });
+      setAnswer(String(data.answer || "").trim());
+    } catch (err: any) {
+      setNote({ kind: "error", text: friendly(err) });
+    } finally {
+      setBusy("");
     }
   };
 
   return (
-    <div style={styles.bg}>
-      <motion.h1 style={styles.title}>
-        🚀 AI Code Reviewer
-      </motion.h1>
-
-      <div style={styles.container}>
-
-        {/* AUTH */}
-        <div style={styles.card}>
-          <h2>🔐 Auth</h2>
-          <input
-            placeholder="Username"
-            value={username}
-            onChange={(e) => {
-              console.log("Username:", e.target.value);
-              setUsername(e.target.value);
-            }}
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => {
-              console.log("Password:", e.target.value);
-              setPassword(e.target.value);
-            }}
-          />
-          <button onClick={signup}>Signup</button>
-          <button onClick={login}>Login</button>
+    <div className="page">
+      <header className="top">
+        <div className="brand">
+          <span className="logo" aria-hidden>
+            {"</>"}
+          </span>
+          <span>AI Code Reviewer</span>
         </div>
+        {user ? (
+          <div className="who">
+            <span className="avatar">{user[0]?.toUpperCase()}</span>
+            <span>{user}</span>
+            <button className="link" onClick={() => setUser(null)}>
+              Sign out
+            </button>
+          </div>
+        ) : (
+          <a className="link" href="https://github.com/Praneethchowdary07/AI-Code-Reviewer" target="_blank" rel="noreferrer">
+            Source on GitHub
+          </a>
+        )}
+      </header>
 
-        {/* ANALYZE */}
-        <div style={styles.card}>
-          <h2>📂 Analyze</h2>
-          <input
-            placeholder="https://github.com/user/repo"
-            value={repo}
-            onChange={(e) => {
-              console.log("Input value:", e.target.value); // 🔥 DEBUG
-              setRepo(e.target.value);
-            }}
-          />
-          <button onClick={analyze}>Analyze Repo</button>
-        </div>
+      <main className="main">
+        <section className="intro">
+          <h1>Understand any GitHub repository</h1>
+          <p>Paste a public repository link to see its details, then ask questions about it.</p>
+        </section>
 
-        {/* ASK */}
-        <div style={styles.card}>
-          <h2>🤖 Ask AI</h2>
-          <input
-            placeholder="Ask something..."
-            value={question}
-            onChange={(e) => {
-              console.log("Question:", e.target.value);
-              setQuestion(e.target.value);
-            }}
-          />
-          <button onClick={ask}>Ask</button>
-
-          {loading && <p>Loading...</p>}
-
-          {displayText && (
-            <div style={styles.answer}>
-              {displayText}
+        {!user ? (
+          <section className="card narrow">
+            <div className="tabs" role="tablist">
+              <button className={mode === "login" ? "tab active" : "tab"} onClick={() => { setMode("login"); setAuthNote(null); }}>
+                Sign in
+              </button>
+              <button className={mode === "signup" ? "tab active" : "tab"} onClick={() => { setMode("signup"); setAuthNote(null); }}>
+                Create account
+              </button>
             </div>
-          )}
-        </div>
+            <form onSubmit={submitAuth} className="stack">
+              <label>
+                Username
+                <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
+              </label>
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete={mode === "login" ? "current-password" : "new-password"}
+                />
+              </label>
+              <button className="primary" disabled={busy === "auth"}>
+                {busy === "auth" ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
+              </button>
+              {authNote && <p className={`notice ${authNote.kind}`}>{authNote.text}</p>}
+              <p className="hint">The free server may take up to a minute to wake up on the first request.</p>
+            </form>
+          </section>
+        ) : (
+          <>
+            <section className="card">
+              <form onSubmit={analyze} className="row">
+                <input
+                  className="grow"
+                  placeholder="https://github.com/owner/repository"
+                  value={repoUrl}
+                  onChange={(e) => setRepoUrl(e.target.value)}
+                />
+                <button className="primary" disabled={busy === "analyze" || !repoUrl.trim()}>
+                  {busy === "analyze" ? "Analyzing…" : "Analyze"}
+                </button>
+              </form>
 
-      </div>
+              {repo && (
+                <div className="repo">
+                  <div className="repo-head">
+                    <h2>{repo.name}</h2>
+                    <span className="pill">★ {repo.stars ?? 0}</span>
+                  </div>
+                  <p className="muted">{repo.description || "No description provided."}</p>
+                </div>
+              )}
+            </section>
+
+            {repo && (
+              <section className="card">
+                <h3>Ask about {repo.name}</h3>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    ask(question);
+                  }}
+                  className="row"
+                >
+                  <input
+                    className="grow"
+                    placeholder="Ask a question about this repository"
+                    value={question}
+                    onChange={(e) => setQuestion(e.target.value)}
+                  />
+                  <button className="primary" disabled={busy === "ask" || !question.trim()}>
+                    {busy === "ask" ? "Thinking…" : "Ask"}
+                  </button>
+                </form>
+                <div className="chips">
+                  {EXAMPLES.map((q) => (
+                    <button key={q} className="chip" onClick={() => ask(q)} disabled={busy === "ask"}>
+                      {q}
+                    </button>
+                  ))}
+                </div>
+                {answer && <pre className="answer">{answer}</pre>}
+              </section>
+            )}
+
+            {note && <p className={`notice ${note.kind}`}>{note.text}</p>}
+          </>
+        )}
+      </main>
+
+      <footer className="foot">
+        React · FastAPI · GitHub REST API — built by Korrapati Praneeth Chowdary
+      </footer>
     </div>
   );
 }
 
-const styles: any = {
-  bg: {
-    minHeight: "100vh",
-    background: "#0f2027",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    paddingTop: "50px",
-    color: "white"
-  },
-  title: {
-    fontSize: "40px",
-    marginBottom: "30px"
-  },
-  container: {
-    display: "flex",
-    gap: "20px",
-    flexWrap: "wrap",
-    justifyContent: "center"
-  },
-  card: {
-    background: "#203a43",
-    padding: "20px",
-    borderRadius: "10px",
-    width: "280px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "10px"
-  },
-  answer: {
-    marginTop: "10px",
-    background: "#000",
-    padding: "10px",
-    borderRadius: "5px"
+function friendly(err: any): string {
+  const msg = String(err?.message || err);
+  if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+    return "Can't reach the server. It may be waking up — try again in a few seconds.";
   }
-};
+  return msg;
+}
